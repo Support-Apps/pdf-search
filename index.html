@@ -763,6 +763,22 @@
             return a.pageNumber - b.pageNumber;
           });
           
+          // Group matches by file and page
+          const grouped = {};
+          allMatches.forEach(match => {
+            const key = `${match.fileName}|${match.pageNumber}`;
+            if (!grouped[key]) {
+              grouped[key] = {
+                fileName: match.fileName,
+                pageNumber: match.pageNumber,
+                matches: [],
+                lineNumber: match.lineNumber,
+                searchTerm: searchTerm
+              };
+            }
+            grouped[key].matches.push(match);
+          });
+          
           let html = `
             <div class="stats">
               נמצאו <span class="stat-number">${results.length}</span> קבצים עם 
@@ -770,32 +786,35 @@
             </div>
           `;
           
-          // Display sorted matches
+          // Display grouped matches
           let currentFile = '';
-          allMatches.forEach((match, index) => {
+          let matchIndex = 0;
+          Object.entries(grouped).forEach(([key, group]) => {
             // Add file header if it's a new file
-            if (match.fileName !== currentFile) {
+            if (group.fileName !== currentFile) {
               if (currentFile !== '') {
                 html += '</div></div>'; // Close previous file's results
               }
-              currentFile = match.fileName;
+              currentFile = group.fileName;
               html += `
-                <div class="result-card" style="animation-delay: ${Math.floor(index / 10) * 0.1}s">
+                <div class="result-card">
                   <div class="result-header">
-                    <div class="result-filename">📄 ${match.fileName}</div>
+                    <div class="result-filename">📄 ${group.fileName}</div>
                   </div>
                   <div class="result-matches">
               `;
             }
             
-            const matchId = `match-${index}`;
+            const matchId = `match-${matchIndex}`;
+            const countText = group.matches.length === 1 ? 'מופע אחד' : `${group.matches.length} מופעים`;
             html += `
               <div class="match-item" id="${matchId}">
-                <button class="view-button" onclick="viewMatch('${matchId}', '${match.fileName}', ${match.pageNumber}, ${match.lineNumber})">
-                  👁️ ${match.fileName} | עמוד ${match.pageNumber}
+                <button class="view-button" onclick="viewMatch('${matchId}', '${group.fileName}', ${group.pageNumber}, ${group.lineNumber}, '${searchTerm}')">
+                  👁️ ${group.fileName} | עמוד ${group.pageNumber} (${countText})
                 </button>
               </div>
             `;
+            matchIndex++;
           });
           
           if (currentFile !== '') {
@@ -815,7 +834,7 @@
       }
     });
 
-    function viewMatch(matchId, fileName, pageNumber, lineNumber) {
+    function viewMatch(matchId, fileName, pageNumber, lineNumber, searchTerm) {
       // Highlight in the search results
       const element = document.getElementById(matchId);
       if (element) {
@@ -825,7 +844,7 @@
         // Try to find and open the actual PDF file
         const file = Array.from(selectedFiles).find(f => f.name === fileName);
         if (file) {
-          openPDFViewer(file, pageNumber, lineNumber);
+          openPDFViewer(file, pageNumber, lineNumber, searchTerm);
         }
         
         setTimeout(() => {
@@ -834,7 +853,7 @@
       }
     }
     
-    function openPDFViewer(file, pageNumber, lineNumber) {
+    function openPDFViewer(file, pageNumber, lineNumber, searchTerm) {
       const fileUrl = URL.createObjectURL(file);
       
       // Use exact page number
@@ -963,6 +982,9 @@
               
               try {
                 const page = await pdfDoc.getPage(num);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 const viewport = page.getViewport({scale: 1.5});
@@ -974,7 +996,54 @@
                 
                 const viewer = document.getElementById('viewer');
                 viewer.innerHTML = '';
-                viewer.appendChild(canvas);
+                
+                // Create container for canvas and text layer
+                const container = document.createElement('div');
+                container.style.position = 'relative';
+                container.style.display = 'inline-block';
+                container.style.width = canvas.width + 'px';
+                container.style.height = canvas.height + 'px';
+                
+                container.appendChild(canvas);
+                
+                // Add text layer for highlighting
+                const textLayer = document.createElement('div');
+                textLayer.style.position = 'absolute';
+                textLayer.style.top = '0';
+                textLayer.style.left = '0';
+                textLayer.style.width = '100%';
+                textLayer.style.height = '100%';
+                textLayer.style.pointerEvents = 'none';
+                
+                // Get text items with positions
+                let html = '';
+                for (let item of textContent.items) {
+                  if (item.str.toLowerCase().includes('${searchTerm}'.toLowerCase())) {
+                    const transform = item.transform;
+                    const x = transform[4];
+                    const y = viewport.height - transform[5];
+                    html += '<span style="position:absolute;left:' + x + 'px;top:' + y + 'px;background:rgba(255,255,0,0.4);padding:2px 4px;border-radius:2px;">' + item.str + '</span>';
+                  }
+                }
+                
+                textLayer.innerHTML = html;
+                container.appendChild(textLayer);
+                viewer.appendChild(container);
+                
+                // Count and display occurrences
+                if ('${searchTerm}') {
+                  const occurrences = (pageText.match(new RegExp('${searchTerm}', 'gi')) || []).length;
+                  if (occurrences > 0) {
+                    const info = document.createElement('div');
+                    info.style.marginTop = '15px';
+                    info.style.padding = '12px';
+                    info.style.background = '#fff3cd';
+                    info.style.borderRadius = '5px';
+                    info.style.textAlign = 'center';
+                    info.innerHTML = '<strong>⭐ מצאתי ' + occurrences + ' מופעים של "' + '${searchTerm}' + '" בעמוד זה</strong>';
+                    viewer.parentElement.appendChild(info);
+                  }
+                }
               } catch (e) {
                 console.error('Error rendering page:', e);
               }
