@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Cache bust: 1775453082 -->
   <title>🔍 חיפוש בקבצי <span style="font-family: 'Dancing Script', cursive;">PDF</span></title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
@@ -330,11 +331,11 @@
     }
 
     .match-item {
-      margin-bottom: 16px;
-      padding: 16px;
-      background: #fafbfc;
-      border-right: 4px solid var(--mint);
-      border-radius: 8px;
+      margin-bottom: 12px;
+      padding: 0;
+      background: transparent;
+      border-right: none;
+      border-radius: 0;
       font-size: 0.95em;
       line-height: 1.7;
       color: var(--text);
@@ -342,8 +343,8 @@
     }
 
     .match-item:hover {
-      background: #f0f5f4;
-      box-shadow: 0 2px 8px rgba(126, 204, 196, 0.1);
+      background: transparent;
+      box-shadow: none;
     }
 
     .match-meta {
@@ -352,24 +353,17 @@
       align-items: center;
       margin-bottom: 12px;
       padding-bottom: 12px;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: none;
       flex-wrap: wrap;
       gap: 12px;
     }
 
     .match-location {
-      display: flex;
-      gap: 18px;
-      font-size: 0.85em;
-      color: var(--text-light);
-      flex-wrap: wrap;
+      display: none;
     }
 
     .match-location-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-weight: 500;
+      display: none;
     }
 
     .match-text {
@@ -381,13 +375,18 @@
     }
 
     .view-button {
-      padding: 8px 16px;
+      padding: 12px 16px;
       background: linear-gradient(135deg, var(--mint) 0%, var(--dark-mint) 100%);
       color: var(--white);
       border: none;
       border-radius: 6px;
-      font-size: 0.85em;
+      font-size: 0.95em;
       font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      width: 100%;
+      text-align: right;
+    }
       cursor: pointer;
       transition: all 0.3s ease;
       white-space: nowrap;
@@ -554,6 +553,14 @@
   </div>
 
   <script>
+    // Suppress PDF.js warnings
+    const originalConsoleWarn = console.warn;
+    console.warn = function(...args) {
+      if (args[0] && typeof args[0] === 'string' && args[0].includes('blacklist')) {
+        return; // Suppress blacklist warning
+      }
+      originalConsoleWarn.apply(console, args);
+    };
     // Suppress PDF.js warnings before loading
     window.pdfjsWorkerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     
@@ -618,37 +625,61 @@
         reader.onload = async (e) => {
           try {
             const pdf = await pdfjsLib.getDocument(e.target.result).promise;
-            let fullText = '';
+            const pagesData = []; // Track page data with line numbers
+            let globalLineNumber = 1;
             
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+              const page = await pdf.getPage(pageNum);
               const textContent = await page.getTextContent();
               const pageText = textContent.items.map(item => item.str).join(' ');
-              fullText += pageText + '\n';
+              const pageLines = pageText.split('\n');
+              
+              pagesData.push({
+                pageNumber: pageNum,
+                startLine: globalLineNumber,
+                lines: pageLines,
+                text: pageText
+              });
+              
+              globalLineNumber += pageLines.length;
             }
             
-            resolve(fullText);
+            resolve(pagesData);
           } catch (error) {
-            resolve('');
+            resolve([]);
           }
         };
         reader.readAsArrayBuffer(file);
       });
     }
 
-    function extractMatches(text, searchTerm, maxMatches = 10) {
+    function extractMatches(pagesData, searchTerm, maxMatches = 10) {
       const matches = [];
-      const sentences = text.split(/[.!?]+/);
       const searchLower = searchTerm.toLowerCase();
       
-      sentences.forEach((sentence, index) => {
-        if (sentence.toLowerCase().includes(searchLower) && matches.length < maxMatches) {
-          matches.push({
-            text: sentence.trim().substring(0, 250),
-            line: index
-          });
+      for (const pageData of pagesData) {
+        // Split by sentence delimiters (., !, ?, etc.)
+        const sentences = pageData.text.split(/(?<=[.!?])\s+/);
+        
+        let lineCounter = pageData.startLine;
+        for (let i = 0; i < sentences.length; i++) {
+          const sentence = sentences[i].trim();
+          
+          // Count lines in this sentence for line numbering
+          const sentenceLines = sentence.split('\n').length;
+          
+          if (sentence.toLowerCase().includes(searchLower) && matches.length < maxMatches) {
+            matches.push({
+              text: sentence.substring(0, 200),
+              lineNumber: lineCounter,
+              pageNumber: pageData.pageNumber,
+              sentence: sentence
+            });
+          }
+          
+          lineCounter += sentenceLines;
         }
-      });
+      }
 
       return matches;
     }
@@ -711,47 +742,65 @@
           `;
         } else {
           const totalMatches = results.reduce((a, b) => a + b.matchCount, 0);
+          
+          results.sort((a, b) => b.matchCount - a.matchCount);
+          
+          // Flatten all matches with their file info for proper sorting
+          const allMatches = [];
+          results.forEach(result => {
+            result.matches.forEach(match => {
+              allMatches.push({
+                fileName: result.fileName,
+                ...match
+              });
+            });
+          });
+          
+          // Sort by filename, then by page number
+          allMatches.sort((a, b) => {
+            const fileComparison = a.fileName.localeCompare(b.fileName);
+            if (fileComparison !== 0) return fileComparison;
+            return a.pageNumber - b.pageNumber;
+          });
+          
           let html = `
             <div class="stats">
               נמצאו <span class="stat-number">${results.length}</span> קבצים עם 
               <span class="stat-number">${totalMatches}</span> התאמות
             </div>
           `;
-
-          results.sort((a, b) => b.matchCount - a.matchCount);
-
-          results.forEach((result, index) => {
-            html += `
-              <div class="result-card" style="animation-delay: ${index * 0.1}s">
-                <div class="result-header">
-                  <div class="result-filename">📄 ${result.fileName}</div>
-                  <div class="result-count">${result.matchCount} התאמות</div>
-                </div>
-                <div class="result-matches">
-            `;
-
-            result.matches.forEach((match, matchIndex) => {
-              const highlighted = match.text.replace(
-                new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
-                '<span class="highlight">$1</span>'
-              );
-              const matchId = `match-${index}-${matchIndex}`;
+          
+          // Display sorted matches
+          let currentFile = '';
+          allMatches.forEach((match, index) => {
+            // Add file header if it's a new file
+            if (match.fileName !== currentFile) {
+              if (currentFile !== '') {
+                html += '</div></div>'; // Close previous file's results
+              }
+              currentFile = match.fileName;
               html += `
-                <div class="match-item" id="${matchId}">
-                  <div class="match-meta">
-                    <div class="match-location">
-                      <div class="match-location-item">📄 ${result.fileName}</div>
-                      <div class="match-location-item">🔢 שורה ${match.line + 1}</div>
-                    </div>
-                    <button class="view-button" onclick="viewMatch('${matchId}')">👁️ הצג</button>
+                <div class="result-card" style="animation-delay: ${Math.floor(index / 10) * 0.1}s">
+                  <div class="result-header">
+                    <div class="result-filename">📄 ${match.fileName}</div>
                   </div>
-                  <div class="match-text">${highlighted}</div>
-                </div>
+                  <div class="result-matches">
               `;
-            });
-
-            html += `</div></div>`;
+            }
+            
+            const matchId = `match-${index}`;
+            html += `
+              <div class="match-item" id="${matchId}">
+                <button class="view-button" onclick="viewMatch('${matchId}', '${match.fileName}', ${match.pageNumber}, ${match.lineNumber})">
+                  👁️ ${match.fileName} | עמוד ${match.pageNumber}
+                </button>
+              </div>
+            `;
           });
+          
+          if (currentFile !== '') {
+            html += '</div></div>'; // Close last file's results
+          }
 
           resultsDiv.innerHTML = html;
         }
@@ -766,12 +815,189 @@
       }
     });
 
-    function viewMatch(matchId) {
+    function viewMatch(matchId, fileName, pageNumber, lineNumber) {
+      // Highlight in the search results
       const element = document.getElementById(matchId);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.style.animation = 'pulse 0.6s ease';
+        element.classList.add('highlight-match');
+        
+        // Try to find and open the actual PDF file
+        const file = Array.from(selectedFiles).find(f => f.name === fileName);
+        if (file) {
+          openPDFViewer(file, pageNumber, lineNumber);
+        }
+        
+        setTimeout(() => {
+          element.classList.remove('highlight-match');
+        }, 2000);
       }
+    }
+    
+    function openPDFViewer(file, pageNumber, lineNumber) {
+      const fileUrl = URL.createObjectURL(file);
+      
+      // Use exact page number
+      let pageNum = Math.max(1, pageNumber);
+      
+      const viewer = window.open('', '_blank');
+      
+      // Create a simple PDF viewer with PDF.js
+      viewer.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl">
+        <head>
+          <meta charset="UTF-8">
+          <title>${file.name}</title>
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              background: linear-gradient(135deg, #f5e6d3 0%, #e8d4c0 100%);
+              font-family: 'Montserrat', sans-serif;
+              padding: 20px;
+              min-height: 100vh;
+            }
+            .container {
+              max-width: 900px;
+              margin: 0 auto;
+            }
+            .header {
+              background: white;
+              padding: 20px;
+              border-radius: 8px;
+              margin-bottom: 20px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              text-align: center;
+            }
+            .controls {
+              display: flex;
+              justify-content: center;
+              gap: 10px;
+              margin-bottom: 20px;
+              flex-wrap: wrap;
+            }
+            button, input {
+              padding: 10px 15px;
+              border: 1px solid #D4AF37;
+              border-radius: 5px;
+              background: white;
+              cursor: pointer;
+              font-family: inherit;
+              transition: all 0.3s;
+            }
+            button:hover {
+              background: #D4AF37;
+              color: white;
+            }
+            input {
+              width: 70px;
+              text-align: center;
+            }
+            #viewer {
+              background: white;
+              padding: 30px;
+              border-radius: 8px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              text-align: center;
+            }
+            #viewer canvas {
+              max-width: 100%;
+              height: auto;
+              border: 1px solid #ddd;
+            }
+            .info {
+              text-align: center;
+              color: #666;
+              margin-top: 10px;
+              font-size: 14px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h2>${file.name} - עמוד ${pageNum}</h2>
+            </div>
+            
+            <div class="controls">
+              <button onclick="prevPage()">← עמוד קודם</button>
+              <input type="number" id="pageNum" min="1" value="${pageNum}" style="width: 60px;">
+              <span style="padding: 10px;"> / <span id="totalPages">1</span></span>
+              <button onclick="nextPage()">עמוד הבא →</button>
+            </div>
+            
+            <div id="viewer"></div>
+            <div class="info">עמוד: ${pageNum} | שורה: ${lineNumber}</div>
+          </div>
+          
+          <script>
+    // Suppress PDF.js warnings
+    const originalConsoleWarn = console.warn;
+    console.warn = function(...args) {
+      if (args[0] && typeof args[0] === 'string' && args[0].includes('blacklist')) {
+        return; // Suppress blacklist warning
+      }
+      originalConsoleWarn.apply(console, args);
+    };
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            
+            let pdfDoc = null;
+            let currentPage = ${pageNum};
+            
+            async function initPDF() {
+              try {
+                pdfDoc = await pdfjsLib.getDocument('${fileUrl}').promise;
+                document.getElementById('totalPages').textContent = pdfDoc.numPages;
+                document.getElementById('pageNum').max = pdfDoc.numPages;
+                await renderPage(currentPage);
+              } catch (e) {
+                document.getElementById('viewer').innerHTML = '<p>שגיאה בטעינת הקובץ</p>';
+              }
+            }
+            
+            async function renderPage(num) {
+              if (!pdfDoc || num < 1 || num > pdfDoc.numPages) return;
+              currentPage = num;
+              document.getElementById('pageNum').value = num;
+              
+              try {
+                const page = await pdfDoc.getPage(num);
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const viewport = page.getViewport({scale: 1.5});
+                
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                await page.render({canvasContext: ctx, viewport: viewport}).promise;
+                
+                const viewer = document.getElementById('viewer');
+                viewer.innerHTML = '';
+                viewer.appendChild(canvas);
+              } catch (e) {
+                console.error('Error rendering page:', e);
+              }
+            }
+            
+            function nextPage() {
+              renderPage(currentPage + 1);
+            }
+            
+            function prevPage() {
+              renderPage(currentPage - 1);
+            }
+            
+            document.getElementById('pageNum').addEventListener('change', (e) => {
+              renderPage(parseInt(e.target.value) || currentPage);
+            });
+            
+            initPDF();
+          <\/script>
+        </body>
+        </html>
+      `);
+      viewer.document.close();
     }
 
     // Add pulse animation
@@ -782,11 +1008,17 @@
           background-color: var(--white);
         }
         50% {
-          background-color: rgba(212, 175, 55, 0.2);
+          background-color: rgba(212, 175, 55, 0.3);
         }
         100% {
           background-color: var(--white);
         }
+      }
+      
+      .highlight-match {
+        background-color: rgba(212, 175, 55, 0.3) !important;
+        border-left: 4px solid #D4AF37 !important;
+        transition: all 0.3s ease;
       }
     `;
     document.head.appendChild(style);
