@@ -997,37 +997,42 @@
                 const viewer = document.getElementById('viewer');
                 viewer.innerHTML = '';
                 
-                // Create container for canvas and text layer
+                // Create container for canvas and highlights
                 const container = document.createElement('div');
                 container.style.position = 'relative';
                 container.style.display = 'inline-block';
-                container.style.width = canvas.width + 'px';
-                container.style.height = canvas.height + 'px';
                 
                 container.appendChild(canvas);
                 
-                // Add text layer for highlighting
-                const textLayer = document.createElement('div');
-                textLayer.style.position = 'absolute';
-                textLayer.style.top = '0';
-                textLayer.style.left = '0';
-                textLayer.style.width = '100%';
-                textLayer.style.height = '100%';
-                textLayer.style.pointerEvents = 'none';
+                // Add highlighting layer BEFORE canvas
+                const highlightLayer = document.createElement('canvas');
+                highlightLayer.width = canvas.width;
+                highlightLayer.height = canvas.height;
+                highlightLayer.style.position = 'absolute';
+                highlightLayer.style.top = '0';
+                highlightLayer.style.left = '0';
+                highlightLayer.style.pointerEvents = 'none';
                 
-                // Get text items with positions
-                let html = '';
+                const highlightCtx = highlightLayer.getContext('2d');
+                
+                // Highlight matching text items
                 for (let item of textContent.items) {
                   if (item.str.toLowerCase().includes('${searchTerm}'.toLowerCase())) {
                     const transform = item.transform;
                     const x = transform[4];
-                    const y = viewport.height - transform[5];
-                    html += '<span style="position:absolute;left:' + x + 'px;top:' + y + 'px;background:rgba(255,255,0,0.4);padding:2px 4px;border-radius:2px;">' + item.str + '</span>';
+                    const y = viewport.height - transform[5] - 10;
+                    const width = item.width * transform[0];
+                    const height = 15;
+                    
+                    highlightCtx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+                    highlightCtx.fillRect(x, y, width, height);
+                    highlightCtx.strokeStyle = 'rgba(255, 200, 0, 0.6)';
+                    highlightCtx.lineWidth = 1;
+                    highlightCtx.strokeRect(x, y, width, height);
                   }
                 }
                 
-                textLayer.innerHTML = html;
-                container.appendChild(textLayer);
+                container.insertBefore(highlightLayer, canvas);
                 viewer.appendChild(container);
                 
                 // Count and display occurrences
