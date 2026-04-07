@@ -998,48 +998,6 @@
                 viewer.innerHTML = '';
                 viewer.appendChild(canvas);
                 
-                // Create text layer for highlighting
-                const textLayer = document.createElement('div');
-                textLayer.className = 'textLayer';
-                textLayer.style.position = 'absolute';
-                textLayer.style.left = '0';
-                textLayer.style.top = '0';
-                textLayer.style.right = '0';
-                textLayer.style.bottom = '0';
-                textLayer.style.overflow = 'hidden';
-                textLayer.style.opacity = '0.2';
-                textLayer.style.lineHeight = '1';
-                textLayer.style.textAlign = 'initial';
-                
-                const scale = viewport.scale;
-                let html = '';
-                
-                // Get text with positions
-                const textDivs = [];
-                for (let item of textContent.items) {
-                  const transform = item.transform;
-                  const fontHeight = Math.sqrt((transform[2] * transform[2]) + (transform[3] * transform[3]));
-                  const tx = transform[4] * scale;
-                  const ty = (viewport.height - item.height) * scale;
-                  
-                  if (item.str.toLowerCase().includes('${searchTerm}'.toLowerCase())) {
-                    // Highlight matching words
-                    html += '<div style="position:absolute;left:' + tx + 'px;top:' + ty + 'px;background:yellow;color:black;font-size:' + fontHeight + 'px;padding:2px;">' + item.str + '</div>';
-                  } else {
-                    html += '<div style="position:absolute;left:' + tx + 'px;top:' + ty + 'px;color:transparent;font-size:' + fontHeight + 'px;">' + item.str + '</div>';
-                  }
-                }
-                
-                textLayer.innerHTML = html;
-                
-                const container = document.createElement('div');
-                container.style.position = 'relative';
-                container.style.display = 'inline-block';
-                container.appendChild(canvas);
-                container.appendChild(textLayer);
-                
-                viewer.appendChild(container);
-                
                 // Count and display occurrences
                 if ('${searchTerm}') {
                   const occurrences = (pageText.match(new RegExp('${searchTerm}', 'gi')) || []).length;
