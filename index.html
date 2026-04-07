@@ -996,43 +996,48 @@
                 
                 const viewer = document.getElementById('viewer');
                 viewer.innerHTML = '';
+                viewer.appendChild(canvas);
                 
-                // Create container for canvas and highlights
-                const container = document.createElement('div');
-                container.style.position = 'relative';
-                container.style.display = 'inline-block';
+                // Create text layer for highlighting
+                const textLayer = document.createElement('div');
+                textLayer.className = 'textLayer';
+                textLayer.style.position = 'absolute';
+                textLayer.style.left = '0';
+                textLayer.style.top = '0';
+                textLayer.style.right = '0';
+                textLayer.style.bottom = '0';
+                textLayer.style.overflow = 'hidden';
+                textLayer.style.opacity = '0.2';
+                textLayer.style.lineHeight = '1';
+                textLayer.style.textAlign = 'initial';
                 
-                container.appendChild(canvas);
+                const scale = viewport.scale;
+                let html = '';
                 
-                // Add highlighting layer BEFORE canvas
-                const highlightLayer = document.createElement('canvas');
-                highlightLayer.width = canvas.width;
-                highlightLayer.height = canvas.height;
-                highlightLayer.style.position = 'absolute';
-                highlightLayer.style.top = '0';
-                highlightLayer.style.left = '0';
-                highlightLayer.style.pointerEvents = 'none';
-                
-                const highlightCtx = highlightLayer.getContext('2d');
-                
-                // Highlight matching text items
+                // Get text with positions
+                const textDivs = [];
                 for (let item of textContent.items) {
+                  const transform = item.transform;
+                  const fontHeight = Math.sqrt((transform[2] * transform[2]) + (transform[3] * transform[3]));
+                  const tx = transform[4] * scale;
+                  const ty = (viewport.height - item.height) * scale;
+                  
                   if (item.str.toLowerCase().includes('${searchTerm}'.toLowerCase())) {
-                    const transform = item.transform;
-                    const x = transform[4];
-                    const y = viewport.height - transform[5] - 10;
-                    const width = item.width * transform[0];
-                    const height = 15;
-                    
-                    highlightCtx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-                    highlightCtx.fillRect(x, y, width, height);
-                    highlightCtx.strokeStyle = 'rgba(255, 200, 0, 0.6)';
-                    highlightCtx.lineWidth = 1;
-                    highlightCtx.strokeRect(x, y, width, height);
+                    // Highlight matching words
+                    html += '<div style="position:absolute;left:' + tx + 'px;top:' + ty + 'px;background:yellow;color:black;font-size:' + fontHeight + 'px;padding:2px;">' + item.str + '</div>';
+                  } else {
+                    html += '<div style="position:absolute;left:' + tx + 'px;top:' + ty + 'px;color:transparent;font-size:' + fontHeight + 'px;">' + item.str + '</div>';
                   }
                 }
                 
-                container.insertBefore(highlightLayer, canvas);
+                textLayer.innerHTML = html;
+                
+                const container = document.createElement('div');
+                container.style.position = 'relative';
+                container.style.display = 'inline-block';
+                container.appendChild(canvas);
+                container.appendChild(textLayer);
+                
                 viewer.appendChild(container);
                 
                 // Count and display occurrences
