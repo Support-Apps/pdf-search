@@ -593,9 +593,13 @@
       originalError.apply(console, args);
     };
     
-    // Set PDF.js configuration
+    // Set PDF.js configuration with CORS bypass for file:// protocol
     if (typeof pdfjsLib !== 'undefined') {
       pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsWorkerSrc;
+      // Disable worker for file:// protocol to avoid CORS issues
+      if (location.protocol === 'file:') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = undefined;
+      }
     }
 
     let selectedFiles = [];
@@ -646,8 +650,13 @@
             
             resolve(pagesData);
           } catch (error) {
+            console.error('Error loading PDF ' + file.name + ':', error);
             resolve([]);
           }
+        };
+        reader.onerror = () => {
+          console.error('Error reading file ' + file.name);
+          resolve([]);
         };
         reader.readAsArrayBuffer(file);
       });
@@ -714,15 +723,19 @@
         progressFill.style.width = ((i / selectedFiles.length) * 100) + '%';
         progressText.textContent = `סורקת קובץ ${i + 1} מתוך ${selectedFiles.length}: ${file.name}`;
 
-        const text = await extractTextFromPDF(file);
-        const matches = extractMatches(text, searchTerm);
+        try {
+          const text = await extractTextFromPDF(file);
+          const matches = extractMatches(text, searchTerm);
 
-        if (matches.length > 0) {
-          results.push({
-            fileName: file.name,
-            matchCount: matches.length,
-            matches: matches
-          });
+          if (matches.length > 0) {
+            results.push({
+              fileName: file.name,
+              matchCount: matches.length,
+              matches: matches
+            });
+          }
+        } catch (err) {
+          console.error('Error processing file ' + file.name + ':', err);
         }
       }
 
@@ -808,8 +821,8 @@
             const matchId = `match-${matchIndex}`;
             const countText = group.matches.length === 1 ? 'מופע אחד' : `${group.matches.length} מופעים`;
             html += `
-              <div class="match-item" id="${matchId}">
-                <button class="view-button" onclick="viewMatch('${matchId}', '${group.fileName}', ${group.pageNumber}, ${group.lineNumber}, '${searchTerm}')">
+              <div class="match-item" id="${matchId}" data-file="${group.fileName.replace(/"/g, '&quot;')}" data-page="${group.pageNumber}" data-line="${group.lineNumber}" data-search="${searchTerm.replace(/"/g, '&quot;')}">
+                <button class="view-button" onclick="handleViewClick(this)">
                   👁️ ${group.fileName} | עמוד ${group.pageNumber} (${countText})
                 </button>
               </div>
@@ -833,6 +846,19 @@
         search();
       }
     });
+
+    function handleViewClick(btn) {
+      const item = btn.closest('.match-item');
+      const fileName = item.getAttribute('data-file');
+      const pageNumber = parseInt(item.getAttribute('data-page'));
+      const lineNumber = parseInt(item.getAttribute('data-line'));
+      const searchTerm = item.getAttribute('data-search');
+      
+      const file = Array.from(selectedFiles).find(f => f.name === fileName);
+      if (file) {
+        openPDFViewer(file, pageNumber, lineNumber, searchTerm);
+      }
+    }
 
     function viewMatch(matchId, fileName, pageNumber, lineNumber, searchTerm) {
       // Highlight in the search results
